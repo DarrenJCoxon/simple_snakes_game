@@ -1,12 +1,8 @@
 // Initialize Kaboom
 kaboom({
     global: true,
-    // Make canvas fill the screen, but keep aspect ratio, letterbox if needed
-    // width: 640,
-    // height: 480,
-    // Use width/height or fullscreen, not both usually
     fullscreen: true,
-    scale: 1, // Set scale to 1 initially, adjust if needed
+    scale: 1,
     clearColor: [0.1, 0.1, 0.15, 1], // Dark background
 });
 
@@ -17,27 +13,20 @@ const GAME_SPEED = 0.15; // Seconds between snake moves (lower is faster)
 let score = 0;
 let currentDirection = vec2(1, 0); // Start moving right (x=1, y=0)
 let nextDirection = vec2(1, 0);   // Buffer for next direction input
-let snake = [];                   // Array to hold snake segment game objects
-let food = null;                  // Game object for the food
+let snake = [];                   // Array to hold snake segment *references* (Kaboom objects)
+let food = null;                  // Game object *reference* for the food
 let gameOver = false;
-let scoreLabel = null;            // Label to display score
-let gameOverLabel = null;         // Label for game over message
+let scoreLabel = null;            // Reference to score label object
+let gameOverLabel = null;         // Reference to game over label object
 
 // --- Helper Functions ---
 
-/** Gets grid coordinates from pixel coordinates */
-// function toGrid(p) {
-//     return vec2(Math.floor(p.x / GRID_SIZE), Math.floor(p.y / GRID_SIZE));
-// }
-
 /** Gets pixel coordinates from grid coordinates */
 function toPixel(p) {
-    // Ensure p is a Vec2 object before accessing x/y
     if (!p || typeof p.x === 'undefined' || typeof p.y === 'undefined') {
         console.error("Invalid input to toPixel:", p);
-        return vec2(0, 0); // Return a default value
+        return vec2(0, 0);
     }
-     // Center the grid elements visually? Optional. Add GRID_SIZE / 2 to x and y?
     return vec2(p.x * GRID_SIZE, p.y * GRID_SIZE);
 }
 
@@ -51,39 +40,36 @@ function placeFood() {
     const grid = getGridDimensions();
     let newPosGrid = null;
 
-    // Keep trying until we find a spot not occupied by the snake
+    // Get current snake grid positions into a Set for faster lookup
+    const snakeGridPositions = new Set();
+    for (const segment of snake) {
+         const segGridPos = vec2(Math.floor(segment.pos.x / GRID_SIZE), Math.floor(segment.pos.y / GRID_SIZE));
+         snakeGridPositions.add(`${segGridPos.x},${segGridPos.y}`); // Store as string "x,y"
+    }
+
+
     while (newPosGrid === null) {
         const potentialX = randi(0, grid.x);
         const potentialY = randi(0, grid.y);
         const potentialPos = vec2(potentialX, potentialY);
 
-        // Check against all snake segment grid positions
-        let collision = false;
-        for (const segment of snake) {
-            // Calculate grid position of the segment
-             const segGridPos = vec2(Math.floor(segment.pos.x / GRID_SIZE), Math.floor(segment.pos.y / GRID_SIZE));
-            if (potentialPos.eq(segGridPos)) {
-                collision = true;
-                break;
-            }
-        }
-
-        if (!collision) {
+        // Check if the potential position string is in the Set
+        if (!snakeGridPositions.has(`${potentialPos.x},${potentialPos.y}`)) {
             newPosGrid = potentialPos;
         }
     }
 
-    // If food already exists, update its position, otherwise create it
     const pixelPos = toPixel(newPosGrid);
     if (food) {
         food.pos = pixelPos;
     } else {
+        // Create the food object
         food = add([
             rect(GRID_SIZE, GRID_SIZE),
             pos(pixelPos),
             color(255, 0, 0), // Red
-            area(), // For collision detection
-            "food" // Tag for identification
+            area(),
+            "food" // Tag
         ]);
     }
      console.log("Placed food at grid:", newPosGrid, "pixel:", pixelPos);
@@ -91,20 +77,37 @@ function placeFood() {
 
 /** Resets the game state */
 function resetGame() {
-    // Clear existing game objects (snake, food, labels)
-    every("snake", destroy);
-    every("food", destroy); // Assumes only one food item
+    console.log("Resetting game..."); // Add log for debugging
+
+    // *** FIX HERE: Use get() and loop to destroy ***
+    const existingSnake = get("snake");
+    for (const segment of existingSnake) {
+        destroy(segment);
+    }
+
+    const existingFood = get("food");
+     for (const foodItem of existingFood) {
+        destroy(foodItem);
+    }
+    // *** End of fix ***
+
+    // Destroy labels if they exist
     if (scoreLabel) destroy(scoreLabel);
     if (gameOverLabel) destroy(gameOverLabel);
 
+    // Clear internal references
     snake = [];
     food = null;
+    scoreLabel = null;
+    gameOverLabel = null;
+
+    // Reset game variables
     score = 0;
     gameOver = false;
-    currentDirection = vec2(1, 0); // Reset direction
+    currentDirection = vec2(1, 0);
     nextDirection = vec2(1, 0);
 
-    // Create initial snake (3 segments)
+    // Create initial snake
     const grid = getGridDimensions();
     const startX = Math.floor(grid.x / 4);
     const startY = Math.floor(grid.y / 2);
@@ -117,40 +120,50 @@ function resetGame() {
             area(),
             "snake" // Tag
         ]);
-        snake.unshift(segment); // Add to the front (head is snake[0])
+        // Add the Kaboom game object reference to our snake array
+        snake.unshift(segment); // Head is at snake[0]
     }
+     console.log("Initial snake created, length:", snake.length);
 
     // Place initial food
     placeFood();
 
     // Create score label
     scoreLabel = add([
-        text("Score: 0", { size: Math.floor(GRID_SIZE * 1.5) }), // Dynamic text size
+        text("Score: 0", { size: Math.floor(GRID_SIZE * 1.5) }),
         pos(GRID_SIZE, GRID_SIZE),
-        z(100) // Ensure score is drawn on top
+        z(100)
     ]);
 
     // Restart game loop if it was stopped
     startGameLoop();
+     console.log("Game reset complete.");
 }
 
 /** Main game update loop */
 function gameTick() {
-    if (gameOver) return; // Stop updates if game is over
+    if (gameOver) return;
 
     // --- Update Direction ---
-    // Prevent reversing direction
-    if ((nextDirection.x !== 0 && nextDirection.x === -currentDirection.x) ||
-        (nextDirection.y !== 0 && nextDirection.y === -currentDirection.y)) {
-        // Ignore reversal attempt, keep current direction
-    } else {
-        currentDirection = nextDirection;
+    if (!currentDirection.eq(nextDirection)) { // Only check if different
+        if ((nextDirection.x !== 0 && nextDirection.x === -currentDirection.x) ||
+            (nextDirection.y !== 0 && nextDirection.y === -currentDirection.y)) {
+            // Ignore reversal attempt
+        } else {
+            currentDirection = nextDirection; // Commit the change
+        }
     }
 
+
     // --- Calculate New Head Position ---
+    if (!snake || snake.length === 0) {
+         console.error("Snake array is empty or null in gameTick!");
+         gameOver = true; // Treat as game over if snake disappears
+         return;
+    }
     const head = snake[0];
     const headGridPos = vec2(Math.floor(head.pos.x / GRID_SIZE), Math.floor(head.pos.y / GRID_SIZE));
-    const nextHeadGridPos = headGridPos.add(currentDirection); // Add direction vector
+    const nextHeadGridPos = headGridPos.add(currentDirection);
 
     // --- Collision Detection ---
     const grid = getGridDimensions();
@@ -158,53 +171,53 @@ function gameTick() {
     // 1. Wall Collision
     if (nextHeadGridPos.x < 0 || nextHeadGridPos.x >= grid.x ||
         nextHeadGridPos.y < 0 || nextHeadGridPos.y >= grid.y) {
+        console.log("Wall collision detected at", nextHeadGridPos);
         gameOver = true;
     }
 
     // 2. Self Collision
-    // Need slight delay or check against segments *before* moving tail
-    for (let i = 1; i < snake.length; i++) { // Start from 1 (don't check head against itself)
-         const segGridPos = vec2(Math.floor(snake[i].pos.x / GRID_SIZE), Math.floor(snake[i].pos.y / GRID_SIZE));
-        if (nextHeadGridPos.eq(segGridPos)) {
-            gameOver = true;
-            break;
+    if (!gameOver) { // Only check if not already game over
+        for (let i = 1; i < snake.length; i++) {
+            const segGridPos = vec2(Math.floor(snake[i].pos.x / GRID_SIZE), Math.floor(snake[i].pos.y / GRID_SIZE));
+            if (nextHeadGridPos.eq(segGridPos)) {
+                 console.log("Self collision detected at", nextHeadGridPos);
+                gameOver = true;
+                break;
+            }
         }
     }
 
     // --- Handle Game Over ---
     if (gameOver) {
-        // Display Game Over message
+        console.log("Setting Game Over state");
         gameOverLabel = add([
             text("Game Over!\nScore: " + score + "\n(Press SPACE to Restart)", {
-                size: Math.floor(GRID_SIZE * 2), // Larger text
+                size: Math.floor(GRID_SIZE * 2),
                 align: "center",
             }),
-            pos(center()), // Center of the screen
-            anchor("center"), // Anchor text at its center
-            z(100) // Ensure it's on top
+            pos(center()),
+            anchor("center"),
+            z(100)
         ]);
-        stopGameLoop(); // Stop the interval timer
-        return; // Exit the tick
+        stopGameLoop();
+        return;
     }
 
     // --- Move Snake ---
     let ateFood = false;
     const nextHeadPixelPos = toPixel(nextHeadGridPos);
 
-    // Check for food collision using pixel positions and area component
-    if (food && head.pos.dist(food.pos) < GRID_SIZE) { // Simple distance check, or use overlaps()
-    // Alternative using overlaps: Check if *next* position overlaps food
-    // Need a temporary object or prediction, simpler to check current head vs food pos
-    // Let's refine: check if the nextHeadPixelPos is where the food is
-       const foodGridPos = vec2(Math.floor(food.pos.x / GRID_SIZE), Math.floor(food.pos.y / GRID_SIZE));
-       if (nextHeadGridPos.eq(foodGridPos)) {
-            ateFood = true;
-            score++;
-            scoreLabel.text = "Score: " + score;
-            // Don't remove tail, place new food
-            placeFood();
-       }
-    }
+    // Check for food collision more reliably
+     if (food) {
+          const foodGridPos = vec2(Math.floor(food.pos.x / GRID_SIZE), Math.floor(food.pos.y / GRID_SIZE));
+          if (nextHeadGridPos.eq(foodGridPos)) {
+               console.log("Food eaten!");
+               ateFood = true;
+               score++;
+               scoreLabel.text = "Score: " + score;
+               placeFood(); // Place new food *before* potentially moving tail
+          }
+     }
 
 
     // Create the new head segment
@@ -215,40 +228,37 @@ function gameTick() {
         area(),
         "snake"
     ]);
-    snake.unshift(newHead); // Add new head to the beginning of the array
+    snake.unshift(newHead); // Add new head object reference
 
     // Remove tail if food wasn't eaten
     if (!ateFood) {
-        const tail = snake.pop(); // Remove last element from array
-        destroy(tail); // Remove the tail game object from the screen
+        const tail = snake.pop(); // Remove tail reference from our array
+        if (tail) { // Make sure tail exists before destroying
+             destroy(tail); // Remove the tail game object from Kaboom
+        } else {
+            console.warn("Attempted to pop tail, but snake array was empty?");
+        }
     }
 }
 
 // --- Input Handling ---
 onKeyPress("left", () => {
-    if (currentDirection.x === 0) { // Can only turn left if moving vertically
-       nextDirection = vec2(-1, 0);
-    }
+    if (currentDirection.x === 0) { nextDirection = vec2(-1, 0); }
 });
 onKeyPress("right", () => {
-     if (currentDirection.x === 0) { // Can only turn right if moving vertically
-       nextDirection = vec2(1, 0);
-     }
+     if (currentDirection.x === 0) { nextDirection = vec2(1, 0); }
 });
 onKeyPress("up", () => {
-     if (currentDirection.y === 0) { // Can only turn up if moving horizontally
-        nextDirection = vec2(0, -1);
-     }
+     if (currentDirection.y === 0) { nextDirection = vec2(0, -1); }
 });
 onKeyPress("down", () => {
-    if (currentDirection.y === 0) { // Can only turn down if moving horizontally
-        nextDirection = vec2(0, 1);
-    }
+    if (currentDirection.y === 0) { nextDirection = vec2(0, 1); }
 });
 
 // Restart game on Space press after game over
 onKeyPress("space", () => {
     if (gameOver) {
+         console.log("Space pressed, restarting game...");
         resetGame();
     }
 });
@@ -258,16 +268,19 @@ onKeyPress("space", () => {
 let gameLoopIntervalId = null;
 
 function startGameLoop() {
-    if (gameLoopIntervalId) clearInterval(gameLoopIntervalId); // Clear previous loop if any
-    gameLoopIntervalId = loop(GAME_SPEED, gameTick); // Kaboom's loop function
+    stopGameLoop(); // Ensure any previous loop is stopped first
+    console.log("Starting game loop with speed:", GAME_SPEED);
+    gameLoopIntervalId = loop(GAME_SPEED, gameTick);
 }
 
 function stopGameLoop() {
      if (gameLoopIntervalId) {
-          gameLoopIntervalId.cancel(); // Use cancel() for Kaboom loops
+          console.log("Stopping game loop");
+          gameLoopIntervalId.cancel();
           gameLoopIntervalId = null;
      }
 }
 
 // Initial game setup when scene loads
+console.log("Initial scene load, calling resetGame...");
 resetGame();
